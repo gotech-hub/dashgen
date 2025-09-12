@@ -54,6 +54,13 @@ curl -sSL https://raw.githubusercontent.com/your-org/dashgen/main/scripts/instal
 ### Option 4: Using Go
 ```bash
 go install github.com/gotech-hub/dashgen/cmd/dashgen@latest
+
+# If 'dashgen' command not found, add Go bin to PATH:
+export PATH=$PATH:$(go env GOPATH)/bin
+
+# Or add permanently to your shell profile:
+echo 'export PATH=$PATH:$(go env GOPATH)/bin' >> ~/.zshrc  # for zsh
+echo 'export PATH=$PATH:$(go env GOPATH)/bin' >> ~/.bashrc # for bash
 ```
 
 ### Option 5: Docker
@@ -250,14 +257,37 @@ dashgen --root=. --module=github.com/myorg/myapp
 
 ## 🐛 Troubleshooting
 
+### Command 'dashgen' not found sau khi `go install`
+Vấn đề này xảy ra khi Go bin directory không có trong PATH.
+
+**Giải pháp:**
+```bash
+# Kiểm tra GOPATH
+go env GOPATH
+
+# Thêm vào PATH tạm thời
+export PATH=$PATH:$(go env GOPATH)/bin
+
+# Thêm vào PATH vĩnh viễn
+echo 'export PATH=$PATH:$(go env GOPATH)/bin' >> ~/.zshrc  # cho zsh
+echo 'export PATH=$PATH:$(go env GOPATH)/bin' >> ~/.bashrc # cho bash
+
+# Reload shell
+source ~/.zshrc  # hoặc ~/.bashrc
+
+# Kiểm tra
+which dashgen
+dashgen --version
+```
+
 ### Lỗi "Found 0 entities"
 - Kiểm tra comment `@entity` đúng format
 - Đảm bảo không có dòng trống giữa comment và type
 - Kiểm tra đường dẫn file data.go
 
 ### Lỗi template
-- Kiểm tra Go version >= 1.21
-- Rebuild tool: `go build -o dashgen ./cmd/dashgen`
+- Kiểm tra Go version >= 1.24
+- Rebuild tool: `go install github.com/gotech-hub/dashgen/cmd/dashgen@latest`
 
 ### File không được generate
 - Kiểm tra quyền ghi thư mục

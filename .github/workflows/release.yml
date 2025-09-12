@@ -1,0 +1,90 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.24'
+
+    - name: Get version
+      id: version
+      run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+    - name: Build binaries
+      run: make build-all VERSION=${{ steps.version.outputs.VERSION }}
+
+    - name: Create checksums
+      run: |
+        cd dist
+        sha256sum * > checksums.txt
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          dist/*
+        body: |
+          ## Changes in ${{ steps.version.outputs.VERSION }}
+          
+          ### 🚀 Features
+          - Auto-generated release for ${{ steps.version.outputs.VERSION }}
+          
+          ### 📦 Installation
+          
+          #### Download Binary
+          Choose the appropriate binary for your platform:
+          - **Linux AMD64**: `dashgen-linux-amd64`
+          - **Linux ARM64**: `dashgen-linux-arm64`
+          - **macOS AMD64**: `dashgen-darwin-amd64`
+          - **macOS ARM64**: `dashgen-darwin-arm64`
+          - **Windows AMD64**: `dashgen-windows-amd64.exe`
+          
+          #### Using Go
+          ```bash
+          go install github.com/gotech-hub/dashgen/cmd/dashgen@${{ steps.version.outputs.VERSION }}
+          ```
+          
+          #### Quick Install Script
+          ```bash
+          curl -sSL https://raw.githubusercontent.com/gotech-hub/dashgen/main/scripts/install.sh | bash
+          ```
+          
+          #### Verify Installation
+          ```bash
+          dashgen --version
+          ```
+          
+          ### 📋 Usage
+          ```bash
+          # Generate from specific model
+          dashgen --root=. --module=github.com/yourorg/yourapp --model=model/user/data.go
+          
+          # Generate from all models
+          dashgen --root=. --module=github.com/yourorg/yourapp
+          
+          # Dry run
+          dashgen --root=. --module=github.com/yourorg/yourapp --dry
+          ```
+          
+          ### 🔍 Checksums
+          Verify your download with the checksums provided in `checksums.txt`.
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

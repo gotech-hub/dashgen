@@ -27,7 +27,7 @@ log_error() {
 }
 
 # Configuration
-REPO="your-org/dashgen"
+REPO="gotech-hub/dashgen"
 BINARY_NAME="dashgen"
 INSTALL_DIR="/usr/local/bin"
 

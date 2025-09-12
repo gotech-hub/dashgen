@@ -106,11 +106,12 @@ func genMainGo(entities []parser.Entity, cfg Config) error {
 	mainPath := filepath.Join(cfg.ProjectRoot, "main.go")
 
 	// Check if main.go already exists
-	if _, err := os.Stat(mainPath); err == nil && !cfg.Force {
-		fmt.Printf("⚠️  main.go already exists, skipping (use -force to overwrite)\n")
-		return nil
+	if _, err := os.Stat(mainPath); err == nil {
+		// File exists, try to update it
+		return updateMainGo(mainPath, entities, cfg)
 	}
 
+	// File doesn't exist, create new one
 	if cfg.DryRun {
 		fmt.Println("would write:", mainPath)
 		return nil
@@ -129,6 +130,87 @@ func genMainGo(entities []parser.Entity, cfg Config) error {
 
 	fmt.Printf("✅ Generated: %s\n", mainPath)
 	return os.WriteFile(mainPath, buf.Bytes(), 0o644)
+}
+
+func updateMainGo(mainPath string, entities []parser.Entity, cfg Config) error {
+	// Read existing main.go
+	content, err := os.ReadFile(mainPath)
+	if err != nil {
+		return err
+	}
+
+	if cfg.DryRun {
+		fmt.Printf("would update: %s\n", mainPath)
+		return nil
+	}
+
+	contentStr := string(content)
+
+	// Generate imports for new entities
+	var newImports []string
+	var newInits []string
+	var newRoutes []string
+
+	for _, entity := range entities {
+		// Generate import - use correct package path
+		pkgPath := entity.PkgPath
+		importAlias := ""
+
+		// Check if we need alias (when package name != entity name)
+		pkgName := filepath.Base(pkgPath)
+		if pkgName != strings.ToLower(entity.Name) {
+			importAlias = fmt.Sprintf("app%s ", entity.Name)
+		}
+
+		newImports = append(newImports, fmt.Sprintf("\t%s\"%s/%s\"", importAlias, cfg.ModulePath, pkgPath))
+
+		// Generate init call
+		var initCall string
+		if importAlias != "" {
+			initCall = fmt.Sprintf("\tapp%s.Init(database)", entity.Name)
+		} else {
+			initCall = fmt.Sprintf("\t%s.Init(database)", pkgName)
+		}
+		newInits = append(newInits, initCall)
+
+		// Generate routes
+		entityLower := strings.ToLower(entity.Name)
+		routes := []string{
+			fmt.Sprintf("\t// Register %s API routes", entity.Name),
+			fmt.Sprintf("\t// Core CRUD operations"),
+			fmt.Sprintf("\tserver.SetHandler(common.APIMethod.POST, \"/v1/%s\", api.Create%s)", entityLower, entity.Name),
+			fmt.Sprintf("\tserver.SetHandler(common.APIMethod.GET, \"/v1/%s\", api.Get%sByID)", entityLower, entity.Name),
+			fmt.Sprintf("\tserver.SetHandler(common.APIMethod.QUERY, \"/v1/%ss\", api.Query%s)", entityLower, entity.Plural),
+			fmt.Sprintf("\tserver.SetHandler(common.APIMethod.PUT, \"/v1/%s\", api.Update%s)", entityLower, entity.Name),
+			fmt.Sprintf("\tserver.SetHandler(common.APIMethod.DELETE, \"/v1/%s\", api.Delete%s)", entityLower, entity.Name),
+			"",
+		}
+		newRoutes = append(newRoutes, strings.Join(routes, "\n"))
+	}
+
+	// Update imports section (add before the closing parenthesis of imports)
+	importMarker := ")"
+	if len(newImports) > 0 {
+		importSection := strings.Join(newImports, "\n") + "\n"
+		contentStr = strings.Replace(contentStr, importMarker, importSection+importMarker, 1)
+	}
+
+	// Update database init section
+	dbMarker := "/*{{ Register database generate }}*/"
+	if strings.Contains(contentStr, dbMarker) && len(newInits) > 0 {
+		initSection := strings.Join(newInits, "\n") + "\n\n\t" + dbMarker
+		contentStr = strings.Replace(contentStr, "\t"+dbMarker, "\t"+initSection, 1)
+	}
+
+	// Update routes section
+	routeMarker := "/*{{ Register User API routes generate }}*/"
+	if strings.Contains(contentStr, routeMarker) && len(newRoutes) > 0 {
+		routeSection := strings.Join(newRoutes, "\n") + "\n\t" + routeMarker
+		contentStr = strings.Replace(contentStr, "\t"+routeMarker, "\t"+routeSection, 1)
+	}
+
+	fmt.Printf("✅ Updated: %s\n", mainPath)
+	return os.WriteFile(mainPath, []byte(contentStr), 0o644)
 }
 
 func toSnake(in string) string {

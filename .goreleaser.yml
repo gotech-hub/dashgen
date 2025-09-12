@@ -1,0 +1,134 @@
+project_name: dashgen
+
+before:
+  hooks:
+    - go mod tidy
+    - go generate ./...
+
+builds:
+  - id: dashgen
+    main: ./cmd/dashgen
+    binary: dashgen
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w
+      - -X main.Version={{.Version}}
+      - -X main.GitCommit={{.Commit}}
+      - -X main.BuildTime={{.Date}}
+
+archives:
+  - id: dashgen
+    builds:
+      - dashgen
+    name_template: "{{ .ProjectName }}-{{ .Version }}-{{ .Os }}-{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: 'checksums.txt'
+
+snapshot:
+  name_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^ci:'
+      - '^chore:'
+      - '^style:'
+      - '^refactor:'
+
+release:
+  github:
+    owner: gotech-hub
+    name: dashgen
+  draft: false
+  prerelease: auto
+  name_template: "{{.ProjectName}} {{.Version}}"
+  header: |
+    ## DashGen {{.Version}}
+    
+    A powerful CLI tool for generating complete backend boilerplate code from Go struct definitions.
+  footer: |
+    ## Installation
+    
+    ### Download Binary
+    Choose the appropriate binary for your platform from the assets below.
+    
+    ### Using Go
+    ```bash
+    go install github.com/gotech-hub/dashgen/cmd/dashgen@{{.Version}}
+    ```
+    
+    ### Verify Installation
+    ```bash
+    dashgen --version
+    ```
+    
+    ---
+    
+    **Full Changelog**: https://github.com/gotech-hub/dashgen/compare/{{.PreviousTag}}...{{.Tag}}
+
+brews:
+  - name: dashgen
+    repository:
+      owner: gotech-hub
+      name: homebrew-tap
+    folder: Formula
+    homepage: https://github.com/gotech-hub/dashgen
+    description: "A powerful CLI tool for generating complete backend boilerplate code from Go struct definitions"
+    license: MIT
+    test: |
+      system "#{bin}/dashgen --version"
+
+nfpms:
+  - id: dashgen
+    package_name: dashgen
+    vendor: GoTech Hub
+    homepage: https://github.com/gotech-hub/dashgen
+    maintainer: GoTech Hub <contact@gotech-hub.com>
+    description: "A powerful CLI tool for generating complete backend boilerplate code from Go struct definitions"
+    license: MIT
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/bin
+
+dockers:
+  - image_templates:
+      - "ghcr.io/gotech-hub/dashgen:{{ .Version }}-amd64"
+      - "ghcr.io/gotech-hub/dashgen:latest-amd64"
+    dockerfile: Dockerfile
+    use: buildx
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.title={{.ProjectName}}"
+      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+
+docker_manifests:
+  - name_template: "ghcr.io/gotech-hub/dashgen:{{ .Version }}"
+    image_templates:
+      - "ghcr.io/gotech-hub/dashgen:{{ .Version }}-amd64"
+  - name_template: "ghcr.io/gotech-hub/dashgen:latest"
+    image_templates:
+      - "ghcr.io/gotech-hub/dashgen:latest-amd64"

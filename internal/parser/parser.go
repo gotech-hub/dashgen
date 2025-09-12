@@ -111,11 +111,26 @@ func ParseDataGo(path string) ([]Entity, error) {
 
 func relModelPath(path string) string {
 	path = filepath.ToSlash(path)
+
+	// Look for /model/ in the path
 	idx := strings.Index(path, "/model/")
-	if idx < 0 {
-		return "model"
+	if idx >= 0 {
+		// Found /model/, extract everything after it
+		return strings.TrimSuffix(path[idx+1:], "/data.go")
 	}
-	return strings.TrimSuffix(path[idx+1:], "/data.go")
+
+	// If path starts with model/ (relative path)
+	if strings.HasPrefix(path, "model/") {
+		return strings.TrimSuffix(path, "/data.go")
+	}
+
+	// Fallback: extract directory if it contains model
+	dir := filepath.Dir(path)
+	if strings.Contains(dir, "model") {
+		return dir
+	}
+
+	return "model"
 }
 
 func parseTags(tag *ast.BasicLit) (jsonTag, bsonTag, validate string) {
