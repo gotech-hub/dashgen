@@ -47,11 +47,12 @@ func genOne(e parser.Entity, cfg Config) error {
 		"Fields":       e.Fields,
 	}
 
-	modelPath := strings.ReplaceAll(e.PkgPath, "model/", "")
+	// Use the full PkgPath for model files (e.g., "model/user" -> "model/user/")
+	modelDir := e.PkgPath
 
 	targets := []struct{ path, tpl string }{
-		{path: filepath.Join(cfg.ProjectRoot, "model", modelPath, "init.go"), tpl: templates.ModelInit},
-		{path: filepath.Join(cfg.ProjectRoot, "model", modelPath, "repository.go"), tpl: templates.ModelRepository},
+		{path: filepath.Join(cfg.ProjectRoot, modelDir, "init.go"), tpl: templates.ModelInit},
+		{path: filepath.Join(cfg.ProjectRoot, modelDir, "repository.go"), tpl: templates.ModelRepository},
 		{path: filepath.Join(cfg.ProjectRoot, "internal/action", strings.ToLower(e.Name)+".go"), tpl: templates.Action},
 		{path: filepath.Join(cfg.ProjectRoot, "internal/api", strings.ToLower(e.Name)+".go"), tpl: templates.API},
 		{path: filepath.Join(cfg.ProjectRoot, "client", strings.ToLower(e.Name)+".go"), tpl: templates.Client},

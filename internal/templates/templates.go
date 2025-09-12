@@ -107,32 +107,135 @@ func (r *mongoRepository) DeleteBy{{.Entity}}ID({{.EntityLower}}ID string) error
 var Action = `package action
 
 import (
-	"context"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+
+	"gitlab.silvertiger.tech/go-sdk/go-common/common"
 	"{{.Module}}/{{.PkgPath}}"
 )
 
-type {{.Entity}}Service struct {
-	Repo {{.Entity | lower}}.{{.Entity}}Repository
+// Create{{.Entity}} creates a new {{.EntityLower}}
+func Create{{.Entity}}(data *{{.EntityLower}}.{{.Entity}}) *common.APIResponse[*{{.EntityLower}}.{{.Entity}}] {
+	repo := {{.EntityLower}}.GetRepository()
+
+	result, err := repo.Create(data)
+
+	if err != nil {
+		// Convert CommonResponse to typed response
+		errorResp := common.FromError(err)
+		return &common.APIResponse[*{{.EntityLower}}.{{.Entity}}]{
+			Status:    common.APIStatus.Invalid,
+			Message:   errorResp.GetMessage(),
+			ErrorCode: errorResp.GetErrorCode(),
+		}
+	}
+
+	return &common.APIResponse[*{{.EntityLower}}.{{.Entity}}]{
+		Status:  common.APIStatus.Ok,
+		Data:    []*{{.EntityLower}}.{{.Entity}}{result},
+		Message: "{{.Entity}} created successfully",
+	}
 }
 
-func (s *{{.Entity}}Service) Create(ctx context.Context, m *{{.Entity | lower}}.{{.Entity}}) error {
-	return s.Repo.Create(ctx, m)
+// Get{{.Entity}}ByID retrieves a {{.EntityLower}} by its ID
+func Get{{.Entity}}ByID(id primitive.ObjectID) *common.APIResponse[*{{.EntityLower}}.{{.Entity}}] {
+	repo := {{.EntityLower}}.GetRepository()
+
+	result, err := repo.GetByID(id)
+	if err != nil {
+		// Convert CommonResponse to typed response
+		errorResp := common.FromError(err)
+		return &common.APIResponse[*{{.EntityLower}}.{{.Entity}}]{
+			Status:    errorResp.GetStatus(),
+			Message:   errorResp.GetMessage(),
+			ErrorCode: errorResp.GetErrorCode(),
+		}
+	}
+
+	return &common.APIResponse[*{{.EntityLower}}.{{.Entity}}]{
+		Status:  common.APIStatus.Ok,
+		Data:    []*{{.EntityLower}}.{{.Entity}}{result},
+		Message: "{{.Entity}} retrieved successfully",
+	}
 }
 
-func (s *{{.Entity}}Service) Get(ctx context.Context, id string) (*{{.Entity | lower}}.{{.Entity}}, error) {
-	return s.Repo.Get(ctx, id)
+// List{{.EntityPlural}} retrieves a list of {{.EntityLower}}s with optional filtering
+func List{{.EntityPlural}}(query *common.Query[{{.EntityLower}}.{{.Entity}}]) *common.APIResponse[*{{.EntityLower}}.{{.Entity}}] {
+	repo := {{.EntityLower}}.GetRepository()
+
+	filter := query.Filter
+	offset := query.Offset
+	limit := query.Limit
+	sort := query.Sort
+
+	if limit == 0 {
+		limit = 10 // default limit
+	}
+
+	results, err := repo.List(filter, offset, limit, sort)
+	if err != nil {
+		// Convert CommonResponse to typed response
+		errorResp := common.FromError(err)
+		return &common.APIResponse[*{{.EntityLower}}.{{.Entity}}]{
+			Status:    common.APIStatus.Invalid,
+			Message:   errorResp.GetMessage(),
+			ErrorCode: errorResp.GetErrorCode(),
+		}
+	}
+
+	// Get total count for pagination
+	total, err := repo.Count(filter)
+	if err != nil {
+		total = 0
+	}
+
+	return &common.APIResponse[*{{.EntityLower}}.{{.Entity}}]{
+		Status:  common.APIStatus.Ok,
+		Data:    results,
+		Message: "{{.EntityPlural}} retrieved successfully",
+		Total:   total,
+	}
 }
 
-func (s *{{.Entity}}Service) Update(ctx context.Context, id string, m *{{.Entity | lower}}.{{.Entity}}) error {
-	return s.Repo.Update(ctx, id, m)
+// Update{{.Entity}} updates an existing {{.EntityLower}}
+func Update{{.Entity}}(id primitive.ObjectID, data *{{.EntityLower}}.{{.Entity}}) *common.APIResponse[*{{.EntityLower}}.{{.Entity}}] {
+	repo := {{.EntityLower}}.GetRepository()
+	result, err := repo.Update(id, data)
+	if err != nil {
+		// Convert CommonResponse to typed response
+		errorResp := common.FromError(err)
+		return &common.APIResponse[*{{.EntityLower}}.{{.Entity}}]{
+			Status:    common.APIStatus.Invalid,
+			Message:   errorResp.GetMessage(),
+			ErrorCode: errorResp.GetErrorCode(),
+		}
+	}
+
+	return &common.APIResponse[*{{.EntityLower}}.{{.Entity}}]{
+		Status:  common.APIStatus.Ok,
+		Data:    []*{{.EntityLower}}.{{.Entity}}{result},
+		Message: "{{.Entity}} updated successfully",
+	}
 }
 
-func (s *{{.Entity}}Service) Delete(ctx context.Context, id string) error {
-	return s.Repo.Delete(ctx, id)
-}
+// Delete{{.Entity}} deletes a {{.EntityLower}} by ID (soft delete)
+func Delete{{.Entity}}(id primitive.ObjectID) *common.APIResponse[any] {
+	repo := {{.EntityLower}}.GetRepository()
 
-func (s *{{.Entity}}Service) Query(ctx context.Context, q {{.Entity | lower}}.Query{{.Entity}}) ([]{{.Entity | lower}}.{{.Entity}}, int64, error) {
-	return s.Repo.Query(ctx, q)
+	err := repo.Delete(id)
+	if err != nil {
+		// Convert CommonResponse to typed response
+		errorResp := common.FromError(err)
+		return &common.APIResponse[any]{
+			Status:    common.APIStatus.Invalid,
+			Message:   errorResp.GetMessage(),
+			ErrorCode: errorResp.GetErrorCode(),
+		}
+	}
+
+	return &common.APIResponse[any]{
+		Status:  common.APIStatus.Ok,
+		Message: "{{.Entity}} deleted successfully",
+	}
 }
 `
 
