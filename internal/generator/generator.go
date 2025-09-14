@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"text/template"
 
@@ -250,6 +251,7 @@ func hasIndexes(fields []parser.Field, indexes []parser.Index) bool {
 // generateIndexes generates index creation code
 func generateIndexes(fields []parser.Field, indexes []parser.Index, entityLower string) string {
 	var indexCreations []string
+	hasIndexes := false
 
 	// Generate field-level indexes
 	for _, field := range fields {
@@ -265,6 +267,7 @@ func generateIndexes(fields []parser.Field, indexes []parser.Index, entityLower 
 		indexCode := generateFieldIndex(field, bsonField, entityLower)
 		if indexCode != "" {
 			indexCreations = append(indexCreations, indexCode)
+			hasIndexes = true
 		}
 	}
 
@@ -273,14 +276,17 @@ func generateIndexes(fields []parser.Field, indexes []parser.Index, entityLower 
 		indexCode := generateCompoundIndex(index, entityLower)
 		if indexCode != "" {
 			indexCreations = append(indexCreations, indexCode)
+			hasIndexes = true
 		}
 	}
 
-	if len(indexCreations) == 0 {
+	if !hasIndexes {
 		return "\t// No indexes defined"
 	}
 
-	return strings.Join(indexCreations, "\n\n")
+	// Add error variable declaration at the beginning
+	result := "\tvar err error\n\n" + strings.Join(indexCreations, "\n\n")
+	return result
 }
 
 func generateFieldIndex(field parser.Field, bsonField, entityLower string) string {
@@ -318,7 +324,7 @@ func generateFieldIndex(field parser.Field, bsonField, entityLower string) strin
 		optionsStr = ", nil"
 	}
 
-	return fmt.Sprintf("\t// Index for %s field\n\terr := %sCollection.CreateIndex(%s%s)\n\tif err != nil {\n\t\treturn err\n\t}", field.Name, entityLower, indexDoc, optionsStr)
+	return fmt.Sprintf("\t// Index for %s field\n\terr = %sCollection.CreateIndex(%s%s)\n\tif err != nil {\n\t\treturn err\n\t}", field.Name, entityLower, indexDoc, optionsStr)
 }
 
 func generateCompoundIndex(index parser.Index, entityLower string) string {
@@ -402,8 +408,10 @@ func updateConstantsFile(entity parser.Entity, cfg Config) error {
 
 	contentStr := string(content)
 
-	// Check if constant already exists
-	if strings.Contains(contentStr, constantName) {
+	// Check if constant already exists using more precise matching
+	constantPattern := fmt.Sprintf(`\b%s\s*=`, constantName)
+	matched, _ := regexp.MatchString(constantPattern, contentStr)
+	if matched {
 		if cfg.DryRun {
 			fmt.Printf("constant %s already exists in: %s\n", constantName, constantsPath)
 		}
@@ -415,23 +423,36 @@ func updateConstantsFile(entity parser.Entity, cfg Config) error {
 		return nil
 	}
 
-	// Add constant to the end of the file (before the last closing brace if it exists)
+	// Add constant to the end of the const block
 	newConstant := fmt.Sprintf("\t%s = \"%s\"\n", constantName, constantValue)
 
-	// Find the best place to insert the constant
+	// Find the const block and insert before its closing parenthesis
 	if strings.Contains(contentStr, "const (") {
-		// Insert before the closing parenthesis of const block
-		lastParenIndex := strings.LastIndex(contentStr, ")")
-		if lastParenIndex != -1 {
-			// Insert before the last closing parenthesis
-			contentStr = contentStr[:lastParenIndex] + newConstant + contentStr[lastParenIndex:]
-		} else {
-			// Fallback: append to end
-			contentStr += newConstant
+		// Find the last closing parenthesis that belongs to a const block
+		constIndex := strings.Index(contentStr, "const (")
+		if constIndex != -1 {
+			// Find the matching closing parenthesis
+			afterConst := contentStr[constIndex:]
+			parenIndex := strings.LastIndex(afterConst, ")")
+			if parenIndex != -1 {
+				// Insert before the closing parenthesis
+				insertPos := constIndex + parenIndex
+				contentStr = contentStr[:insertPos] + newConstant + contentStr[insertPos:]
+			} else {
+				// No closing parenthesis found, append after const (
+				insertPos := constIndex + len("const (") + 1
+				contentStr = contentStr[:insertPos] + newConstant + contentStr[insertPos:]
+			}
 		}
 	} else {
-		// No const block found, append to end
-		contentStr += "\n" + newConstant
+		// No const block found, create one or append to end
+		if strings.TrimSpace(contentStr) == "" || !strings.Contains(contentStr, "package") {
+			// Empty file or no package declaration
+			contentStr += fmt.Sprintf("const (\n%s)\n", newConstant)
+		} else {
+			// Append const block to end of file
+			contentStr = strings.TrimRight(contentStr, "\n") + "\n\n" + fmt.Sprintf("const (\n%s)\n", newConstant)
+		}
 	}
 
 	fmt.Printf("✅ Updated constants: %s (added %s)\n", constantsPath, constantName)
