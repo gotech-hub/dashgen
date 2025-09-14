@@ -73,6 +73,12 @@ func genOne(e parser.Entity, cfg Config) error {
 			return err
 		}
 	}
+
+	// Generate/update constants file
+	if err := updateConstantsFile(e, cfg); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -374,4 +380,87 @@ func generateCompoundIndex(index parser.Index, entityLower string) string {
 	}
 
 	return fmt.Sprintf("\t// %s\n\terr = %sCollection.CreateIndex(%s%s)\n\tif err != nil {\n\t\treturn err\n\t}", comment, entityLower, indexDoc, optionsStr)
+}
+
+// updateConstantsFile adds or updates constants for the entity
+func updateConstantsFile(entity parser.Entity, cfg Config) error {
+	constantsPath := filepath.Join(cfg.ProjectRoot, "constants", "constants.go")
+	constantName := fmt.Sprintf("Param%sID", entity.Name)
+	constantValue := fmt.Sprintf("%s_id", strings.ToLower(entity.Name))
+
+	// Check if constants file exists
+	if _, err := os.Stat(constantsPath); os.IsNotExist(err) {
+		// Create new constants file
+		return createConstantsFile(constantsPath, entity, cfg)
+	}
+
+	// Read existing constants file
+	content, err := os.ReadFile(constantsPath)
+	if err != nil {
+		return fmt.Errorf("failed to read constants file: %v", err)
+	}
+
+	contentStr := string(content)
+
+	// Check if constant already exists
+	if strings.Contains(contentStr, constantName) {
+		if cfg.DryRun {
+			fmt.Printf("constant %s already exists in: %s\n", constantName, constantsPath)
+		}
+		return nil // Constant already exists
+	}
+
+	if cfg.DryRun {
+		fmt.Printf("would add constant %s to: %s\n", constantName, constantsPath)
+		return nil
+	}
+
+	// Add constant to the end of the file (before the last closing brace if it exists)
+	newConstant := fmt.Sprintf("\t%s = \"%s\"\n", constantName, constantValue)
+
+	// Find the best place to insert the constant
+	if strings.Contains(contentStr, "const (") {
+		// Insert before the closing parenthesis of const block
+		lastParenIndex := strings.LastIndex(contentStr, ")")
+		if lastParenIndex != -1 {
+			// Insert before the last closing parenthesis
+			contentStr = contentStr[:lastParenIndex] + newConstant + contentStr[lastParenIndex:]
+		} else {
+			// Fallback: append to end
+			contentStr += newConstant
+		}
+	} else {
+		// No const block found, append to end
+		contentStr += "\n" + newConstant
+	}
+
+	fmt.Printf("✅ Updated constants: %s (added %s)\n", constantsPath, constantName)
+	return os.WriteFile(constantsPath, []byte(contentStr), 0o644)
+}
+
+// createConstantsFile creates a new constants file with the entity constant
+func createConstantsFile(constantsPath string, entity parser.Entity, cfg Config) error {
+	if cfg.DryRun {
+		fmt.Printf("would create constants file: %s\n", constantsPath)
+		return nil
+	}
+
+	// Create constants directory if it doesn't exist
+	if err := os.MkdirAll(filepath.Dir(constantsPath), 0o755); err != nil {
+		return fmt.Errorf("failed to create constants directory: %v", err)
+	}
+
+	constantName := fmt.Sprintf("Param%sID", entity.Name)
+	constantValue := fmt.Sprintf("%s_id", strings.ToLower(entity.Name))
+
+	content := fmt.Sprintf(`package constants
+
+// API parameter constants
+const (
+	%s = "%s"
+)
+`, constantName, constantValue)
+
+	fmt.Printf("✅ Created constants file: %s\n", constantsPath)
+	return os.WriteFile(constantsPath, []byte(content), 0o644)
 }

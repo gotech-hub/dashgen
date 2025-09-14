@@ -3,25 +3,26 @@ package templates
 var ModelInit = `package {{.Entity | lower}}
 
 import (
-	"gitlab.silvertiger.tech/go-sdk/go-mongodb/collection"
-	"{{.Module}}/internal/utils"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+
+	"gitlab.silvertiger.tech/go-sdk/go-mongodb/collection"
+	"{{.Module}}/internal/utils"
 )
 
 var (
 	{{.EntityLower}}Collection        *collection.MongoDBGenericCollection[{{.Entity}}]
 	{{.EntityLower}}DeletedCollection *collection.MongoDBGenericCollection[{{.Entity}}]
-	{{.EntityLower}}Repository        {{.Entity}}Repository
+	{{.EntityLower}}Repository        Repository
 )
 
 func Init(database *mongo.Database) error {
-	{{.EntityLower}}Collection = collection.NewMongoDBGenericCollection[{{.Entity}}]("{{.DBName}}").(*collection.MongoDBGenericCollection[{{.Entity}}])
-	{{.EntityLower}}Collection.SetDatabase(database)
-
 	{{.EntityLower}}DeletedCollection = collection.NewMongoDBGenericCollection[{{.Entity}}]("{{.EntitySnake}}_deleted").(*collection.MongoDBGenericCollection[{{.Entity}}])
 	{{.EntityLower}}DeletedCollection.SetDatabase(database)
+
+	{{.EntityLower}}Collection = collection.NewMongoDBGenericCollection[{{.Entity}}]("{{.DBName}}").(*collection.MongoDBGenericCollection[{{.Entity}}])
+	{{.EntityLower}}Collection.SetDatabase(database)
 
 	// Initialize repository
 	{{.EntityLower}}Repository = &mongoRepository{}
@@ -35,7 +36,7 @@ func Init(database *mongo.Database) error {
 }
 
 // GetRepository returns the initialized repository instance
-func GetRepository() {{.Entity}}Repository {
+func GetRepository() Repository {
 	return {{.EntityLower}}Repository
 }
 
@@ -98,8 +99,6 @@ func (r *mongoRepository) DeleteBy{{.Entity}}ID({{.EntityLower}}ID string) error
 var Action = `package action
 
 import (
-	"go.mongodb.org/mongo-driver/bson/primitive"
-
 	"gitlab.silvertiger.tech/go-sdk/go-common/common"
 	"{{.Module}}/{{.PkgPath}}"
 )
@@ -127,11 +126,11 @@ func Create{{.Entity}}(data *{{.EntityLower}}.{{.Entity}}) *common.APIResponse[*
 	}
 }
 
-// Get{{.Entity}}ByID retrieves a {{.EntityLower}} by its ID
-func Get{{.Entity}}ByID(id primitive.ObjectID) *common.APIResponse[*{{.EntityLower}}.{{.Entity}}] {
+// Get{{.Entity}}By{{.Entity}}ID retrieves a {{.EntityLower}} by its {{.Entity}}ID
+func Get{{.Entity}}By{{.Entity}}ID({{.EntityLower}}ID string) *common.APIResponse[*{{.EntityLower}}.{{.Entity}}] {
 	repo := {{.EntityLower}}.GetRepository()
 
-	result, err := repo.GetByID(id)
+	result, err := repo.GetBy{{.Entity}}ID({{.EntityLower}}ID)
 	if err != nil {
 		// Convert CommonResponse to typed response
 		errorResp := common.FromError(err)
@@ -188,9 +187,9 @@ func List{{.EntityPlural}}(query *common.Query[{{.EntityLower}}.{{.Entity}}]) *c
 }
 
 // Update{{.Entity}} updates an existing {{.EntityLower}}
-func Update{{.Entity}}(id primitive.ObjectID, data *{{.EntityLower}}.{{.Entity}}) *common.APIResponse[*{{.EntityLower}}.{{.Entity}}] {
+func Update{{.Entity}}({{.EntityLower}}ID string, data *{{.EntityLower}}.{{.Entity}}) *common.APIResponse[*{{.EntityLower}}.{{.Entity}}] {
 	repo := {{.EntityLower}}.GetRepository()
-	result, err := repo.Update(id, data)
+	result, err := repo.UpdateBy{{.Entity}}ID({{.EntityLower}}ID, data)
 	if err != nil {
 		// Convert CommonResponse to typed response
 		errorResp := common.FromError(err)
@@ -209,10 +208,10 @@ func Update{{.Entity}}(id primitive.ObjectID, data *{{.EntityLower}}.{{.Entity}}
 }
 
 // Delete{{.Entity}} deletes a {{.EntityLower}} by ID (soft delete)
-func Delete{{.Entity}}(id primitive.ObjectID) *common.APIResponse[any] {
+func Delete{{.Entity}}({{.EntityLower}}ID string) *common.APIResponse[any] {
 	repo := {{.EntityLower}}.GetRepository()
 
-	err := repo.Delete(id)
+	err := repo.DeleteBy{{.Entity}}ID({{.EntityLower}}ID)
 	if err != nil {
 		// Convert CommonResponse to typed response
 		errorResp := common.FromError(err)
@@ -241,7 +240,7 @@ import (
 	"gitlab.silvertiger.tech/go-sdk/go-common/responder"
 	"{{.Module}}/internal/action"
 	"{{.Module}}/{{.PkgPath}}"
-	constants "{{.Module}}/utils"
+	"{{.Module}}/constants"
 )
 
 {{if hasRequiredFields .Fields}}// Email validation regex
@@ -372,7 +371,3 @@ func (c *BackendServiceClient) Delete{{.Entity}}(id string) *common.APIResponse[
 	return response
 }
 `
-
-// MainRouter and MainInit templates removed - library no longer generates main.go content
-
-// MainGo template removed - library no longer generates main.go files
