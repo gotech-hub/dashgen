@@ -240,7 +240,7 @@ import (
 	"gitlab.silvertiger.tech/go-sdk/go-common/responder"
 	"{{.Module}}/internal/action"
 	"{{.Module}}/{{.PkgPath}}"
-	"{{.Module}}/constants"
+	constants "{{.Module}}/utils"
 )
 
 {{if hasRequiredFields .Fields}}// Email validation regex

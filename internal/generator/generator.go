@@ -390,7 +390,7 @@ func generateCompoundIndex(index parser.Index, entityLower string) string {
 
 // updateConstantsFile adds or updates constants for the entity
 func updateConstantsFile(entity parser.Entity, cfg Config) error {
-	constantsPath := filepath.Join(cfg.ProjectRoot, "constants", "constants.go")
+	constantsPath := filepath.Join(cfg.ProjectRoot, "utils", "constants.go")
 	constantName := fmt.Sprintf("Param%sID", entity.Name)
 	constantValue := fmt.Sprintf("%s_id", strings.ToLower(entity.Name))
 
@@ -466,9 +466,9 @@ func createConstantsFile(constantsPath string, entity parser.Entity, cfg Config)
 		return nil
 	}
 
-	// Create constants directory if it doesn't exist
+	// Create utils directory if it doesn't exist
 	if err := os.MkdirAll(filepath.Dir(constantsPath), 0o755); err != nil {
-		return fmt.Errorf("failed to create constants directory: %v", err)
+		return fmt.Errorf("failed to create utils directory: %v", err)
 	}
 
 	constantName := fmt.Sprintf("Param%sID", entity.Name)
