@@ -325,6 +325,7 @@ import "time"
 // @index name:1,created_at:-1
 type User struct {
     ID        string    `json:"id" bson:"_id" validate:"required"`
+    UserID    string    `json:"user)id" bson:"user_id" validate:"required"`
     Name      string    `json:"name" bson:"name" validate:"required,min=2,max=100" index:"1"`
     Email     string    `json:"email" bson:"email" validate:"required,email" index:"unique"`
     Age       int       `json:"age" bson:"age" validate:"min=0,max=150"`
