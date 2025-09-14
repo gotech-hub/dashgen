@@ -27,10 +27,10 @@ func Generate(entities []parser.Entity, cfg Config) error {
 		}
 	}
 
-	// Generate main.go with all entities
-	if err := genMainGo(entities, cfg); err != nil {
-		return err
-	}
+	// Skip main.go generation - library will not interact with main.go anymore
+	// if err := genMainGo(entities, cfg); err != nil {
+	//     return err
+	// }
 
 	return nil
 }
@@ -45,6 +45,7 @@ func genOne(e parser.Entity, cfg Config) error {
 		"EntityPlural": e.Plural,
 		"DBName":       e.DBName,
 		"Fields":       e.Fields,
+		"Indexes":      e.Indexes,
 	}
 
 	// Use the full PkgPath for model files (e.g., "model/user" -> "model/user/")
@@ -58,14 +59,14 @@ func genOne(e parser.Entity, cfg Config) error {
 		{path: filepath.Join(cfg.ProjectRoot, "client", strings.ToLower(e.Name)+".go"), tpl: templates.Client},
 	}
 
-	// Generate router and init snippets for main.go
-	routerSnippetPath := filepath.Join(cfg.ProjectRoot, "generated", "router_"+strings.ToLower(e.Name)+".go.snippet")
-	initSnippetPath := filepath.Join(cfg.ProjectRoot, "generated", "init_"+strings.ToLower(e.Name)+".go.snippet")
-
-	targets = append(targets,
-		struct{ path, tpl string }{path: routerSnippetPath, tpl: templates.MainRouter},
-		struct{ path, tpl string }{path: initSnippetPath, tpl: templates.MainInit},
-	)
+	// Skip generating router and init snippets for main.go - library no longer interacts with main.go
+	// routerSnippetPath := filepath.Join(cfg.ProjectRoot, "generated", "router_"+strings.ToLower(e.Name)+".go.snippet")
+	// initSnippetPath := filepath.Join(cfg.ProjectRoot, "generated", "init_"+strings.ToLower(e.Name)+".go.snippet")
+	//
+	// targets = append(targets,
+	//     struct{ path, tpl string }{path: routerSnippetPath, tpl: templates.MainRouter},
+	//     struct{ path, tpl string }{path: initSnippetPath, tpl: templates.MainInit},
+	// )
 
 	for _, t := range targets {
 		if err := writeIfNeeded(t.path, t.tpl, ctx, cfg); err != nil {
@@ -94,124 +95,19 @@ func writeIfNeeded(path, tpl string, ctx map[string]any, cfg Config) error {
 	}
 
 	var buf bytes.Buffer
-	t := template.Must(template.New("tpl").Funcs(template.FuncMap{"lower": strings.ToLower}).Parse(tpl))
+	t := template.Must(template.New("tpl").Funcs(template.FuncMap{
+		"lower":              strings.ToLower,
+		"generateValidation": generateValidation,
+		"hasRequiredFields":  hasRequiredFields,
+		"generateIndexes":    generateIndexes,
+		"hasIndexes":         hasIndexes,
+	}).Parse(tpl))
 	if err := t.Execute(&buf, ctx); err != nil {
 		return err
 	}
 
 	fmt.Printf("✅ Generated: %s\n", path)
 	return os.WriteFile(path, buf.Bytes(), 0o644)
-}
-
-func genMainGo(entities []parser.Entity, cfg Config) error {
-	mainPath := filepath.Join(cfg.ProjectRoot, "main.go")
-
-	// Check if main.go already exists
-	if _, err := os.Stat(mainPath); err == nil {
-		// File exists, try to update it
-		return updateMainGo(mainPath, entities, cfg)
-	}
-
-	// File doesn't exist, create new one
-	if cfg.DryRun {
-		fmt.Println("would write:", mainPath)
-		return nil
-	}
-
-	ctx := map[string]any{
-		"Module":   cfg.ModulePath,
-		"Entities": entities,
-	}
-
-	var buf bytes.Buffer
-	t := template.Must(template.New("main").Funcs(template.FuncMap{"lower": strings.ToLower}).Parse(templates.MainGo))
-	if err := t.Execute(&buf, ctx); err != nil {
-		return err
-	}
-
-	fmt.Printf("✅ Generated: %s\n", mainPath)
-	return os.WriteFile(mainPath, buf.Bytes(), 0o644)
-}
-
-func updateMainGo(mainPath string, entities []parser.Entity, cfg Config) error {
-	// Read existing main.go
-	content, err := os.ReadFile(mainPath)
-	if err != nil {
-		return err
-	}
-
-	if cfg.DryRun {
-		fmt.Printf("would update: %s\n", mainPath)
-		return nil
-	}
-
-	contentStr := string(content)
-
-	// Generate imports for new entities
-	var newImports []string
-	var newInits []string
-	var newRoutes []string
-
-	for _, entity := range entities {
-		// Generate import - use correct package path
-		pkgPath := entity.PkgPath
-		importAlias := ""
-
-		// Check if we need alias (when package name != entity name)
-		pkgName := filepath.Base(pkgPath)
-		if pkgName != strings.ToLower(entity.Name) {
-			importAlias = fmt.Sprintf("app%s ", entity.Name)
-		}
-
-		newImports = append(newImports, fmt.Sprintf("\t%s\"%s/%s\"", importAlias, cfg.ModulePath, pkgPath))
-
-		// Generate init call
-		var initCall string
-		if importAlias != "" {
-			initCall = fmt.Sprintf("\tapp%s.Init(database)", entity.Name)
-		} else {
-			initCall = fmt.Sprintf("\t%s.Init(database)", pkgName)
-		}
-		newInits = append(newInits, initCall)
-
-		// Generate routes
-		entityLower := strings.ToLower(entity.Name)
-		routes := []string{
-			fmt.Sprintf("\t// Register %s API routes", entity.Name),
-			fmt.Sprintf("\t// Core CRUD operations"),
-			fmt.Sprintf("\tserver.SetHandler(common.APIMethod.POST, \"/v1/%s\", api.Create%s)", entityLower, entity.Name),
-			fmt.Sprintf("\tserver.SetHandler(common.APIMethod.GET, \"/v1/%s\", api.Get%sByID)", entityLower, entity.Name),
-			fmt.Sprintf("\tserver.SetHandler(common.APIMethod.QUERY, \"/v1/%ss\", api.Query%s)", entityLower, entity.Plural),
-			fmt.Sprintf("\tserver.SetHandler(common.APIMethod.PUT, \"/v1/%s\", api.Update%s)", entityLower, entity.Name),
-			fmt.Sprintf("\tserver.SetHandler(common.APIMethod.DELETE, \"/v1/%s\", api.Delete%s)", entityLower, entity.Name),
-			"",
-		}
-		newRoutes = append(newRoutes, strings.Join(routes, "\n"))
-	}
-
-	// Update imports section (add before the closing parenthesis of imports)
-	importMarker := ")"
-	if len(newImports) > 0 {
-		importSection := strings.Join(newImports, "\n") + "\n"
-		contentStr = strings.Replace(contentStr, importMarker, importSection+importMarker, 1)
-	}
-
-	// Update database init section
-	dbMarker := "/*{{ Register database generate }}*/"
-	if strings.Contains(contentStr, dbMarker) && len(newInits) > 0 {
-		initSection := strings.Join(newInits, "\n") + "\n\n\t" + dbMarker
-		contentStr = strings.Replace(contentStr, "\t"+dbMarker, "\t"+initSection, 1)
-	}
-
-	// Update routes section
-	routeMarker := "/*{{ Register User API routes generate }}*/"
-	if strings.Contains(contentStr, routeMarker) && len(newRoutes) > 0 {
-		routeSection := strings.Join(newRoutes, "\n") + "\n\t" + routeMarker
-		contentStr = strings.Replace(contentStr, "\t"+routeMarker, "\t"+routeSection, 1)
-	}
-
-	fmt.Printf("✅ Updated: %s\n", mainPath)
-	return os.WriteFile(mainPath, []byte(contentStr), 0o644)
 }
 
 func toSnake(in string) string {
@@ -223,4 +119,259 @@ func toSnake(in string) string {
 		out = append(out, rune(strings.ToLower(string(r))[0]))
 	}
 	return string(out)
+}
+
+// hasRequiredFields checks if any field has required validation
+func hasRequiredFields(fields []parser.Field) bool {
+	for _, field := range fields {
+		if strings.Contains(field.Validate, "required") {
+			return true
+		}
+	}
+	return false
+}
+
+// generateValidation generates validation code for fields with validate tags
+func generateValidation(fields []parser.Field, entityLower string) string {
+	var validations []string
+
+	for _, field := range fields {
+		if field.Validate == "" {
+			continue
+		}
+
+		// Parse validation rules
+		rules := strings.Split(field.Validate, ",")
+		for _, rule := range rules {
+			rule = strings.TrimSpace(rule)
+
+			switch {
+			case rule == "required":
+				validations = append(validations, generateRequiredValidation(field, entityLower))
+			case strings.HasPrefix(rule, "min="):
+				validations = append(validations, generateMinValidation(field, entityLower, rule))
+			case strings.HasPrefix(rule, "max="):
+				validations = append(validations, generateMaxValidation(field, entityLower, rule))
+			case rule == "email":
+				validations = append(validations, generateEmailValidation(field, entityLower))
+			}
+		}
+	}
+
+	if len(validations) == 0 {
+		return ""
+	}
+
+	return "\t// Field validation\n" + strings.Join(validations, "\n")
+}
+
+func generateRequiredValidation(field parser.Field, entityLower string) string {
+	fieldName := field.Name
+	jsonTag := field.JSONTag
+	if jsonTag == "" {
+		jsonTag = strings.ToLower(fieldName)
+	}
+
+	switch field.Type {
+	case "string":
+		return fmt.Sprintf("\tif %sData.%s == \"\" {\n\t\treturn res.Respond(common.NewErrorResponse(common.APIStatus.Invalid, \"VALIDATION_FAILED\", \"%s is required\"))\n\t}", entityLower, fieldName, jsonTag)
+	case "int", "int32", "int64":
+		return fmt.Sprintf("\tif %sData.%s == 0 {\n\t\treturn res.Respond(common.NewErrorResponse(common.APIStatus.Invalid, \"VALIDATION_FAILED\", \"%s is required\"))\n\t}", entityLower, fieldName, jsonTag)
+	default:
+		// For other types, check for zero value using reflection-like approach
+		return fmt.Sprintf("\t// TODO: Add validation for %s.%s (type: %s)", entityLower, fieldName, field.Type)
+	}
+}
+
+func generateMinValidation(field parser.Field, entityLower string, rule string) string {
+	minValue := strings.TrimPrefix(rule, "min=")
+	fieldName := field.Name
+	jsonTag := field.JSONTag
+	if jsonTag == "" {
+		jsonTag = strings.ToLower(fieldName)
+	}
+
+	switch field.Type {
+	case "string":
+		return fmt.Sprintf("\tif len(%sData.%s) < %s {\n\t\treturn res.Respond(common.NewErrorResponse(common.APIStatus.Invalid, \"VALIDATION_FAILED\", \"%s must be at least %s characters\"))\n\t}", entityLower, fieldName, minValue, jsonTag, minValue)
+	case "int", "int32", "int64":
+		return fmt.Sprintf("\tif %sData.%s < %s {\n\t\treturn res.Respond(common.NewErrorResponse(common.APIStatus.Invalid, \"VALIDATION_FAILED\", \"%s must be at least %s\"))\n\t}", entityLower, fieldName, minValue, jsonTag, minValue)
+	default:
+		return fmt.Sprintf("\t// TODO: Add min validation for %s.%s (type: %s)", entityLower, fieldName, field.Type)
+	}
+}
+
+func generateMaxValidation(field parser.Field, entityLower string, rule string) string {
+	maxValue := strings.TrimPrefix(rule, "max=")
+	fieldName := field.Name
+	jsonTag := field.JSONTag
+	if jsonTag == "" {
+		jsonTag = strings.ToLower(fieldName)
+	}
+
+	switch field.Type {
+	case "string":
+		return fmt.Sprintf("\tif len(%sData.%s) > %s {\n\t\treturn res.Respond(common.NewErrorResponse(common.APIStatus.Invalid, \"VALIDATION_FAILED\", \"%s must be at most %s characters\"))\n\t}", entityLower, fieldName, maxValue, jsonTag, maxValue)
+	case "int", "int32", "int64":
+		return fmt.Sprintf("\tif %sData.%s > %s {\n\t\treturn res.Respond(common.NewErrorResponse(common.APIStatus.Invalid, \"VALIDATION_FAILED\", \"%s must be at most %s\"))\n\t}", entityLower, fieldName, maxValue, jsonTag, maxValue)
+	default:
+		return fmt.Sprintf("\t// TODO: Add max validation for %s.%s (type: %s)", entityLower, fieldName, field.Type)
+	}
+}
+
+func generateEmailValidation(field parser.Field, entityLower string) string {
+	fieldName := field.Name
+	jsonTag := field.JSONTag
+	if jsonTag == "" {
+		jsonTag = strings.ToLower(fieldName)
+	}
+
+	return fmt.Sprintf("\tif %sData.%s != \"\" && !isValidEmail(%sData.%s) {\n\t\treturn res.Respond(common.NewErrorResponse(common.APIStatus.Invalid, \"VALIDATION_FAILED\", \"%s must be a valid email address\"))\n\t}", entityLower, fieldName, entityLower, fieldName, jsonTag)
+}
+
+// hasIndexes checks if entity has any indexes defined
+func hasIndexes(fields []parser.Field, indexes []parser.Index) bool {
+	// Check field-level indexes
+	for _, field := range fields {
+		if field.Index != "" {
+			return true
+		}
+	}
+	// Check compound indexes
+	return len(indexes) > 0
+}
+
+// generateIndexes generates index creation code
+func generateIndexes(fields []parser.Field, indexes []parser.Index, entityLower string) string {
+	var indexCreations []string
+
+	// Generate field-level indexes
+	for _, field := range fields {
+		if field.Index == "" {
+			continue
+		}
+
+		bsonField := field.BSONTag
+		if bsonField == "" {
+			bsonField = strings.ToLower(field.Name)
+		}
+
+		indexCode := generateFieldIndex(field, bsonField, entityLower)
+		if indexCode != "" {
+			indexCreations = append(indexCreations, indexCode)
+		}
+	}
+
+	// Generate compound indexes
+	for _, index := range indexes {
+		indexCode := generateCompoundIndex(index, entityLower)
+		if indexCode != "" {
+			indexCreations = append(indexCreations, indexCode)
+		}
+	}
+
+	if len(indexCreations) == 0 {
+		return "\t// No indexes defined"
+	}
+
+	return strings.Join(indexCreations, "\n\n")
+}
+
+func generateFieldIndex(field parser.Field, bsonField, entityLower string) string {
+	indexType := field.Index
+
+	var indexDoc string
+	var options []string
+
+	switch indexType {
+	case "1":
+		indexDoc = fmt.Sprintf("bson.D{{Key: \"%s\", Value: 1}}", bsonField)
+	case "-1":
+		indexDoc = fmt.Sprintf("bson.D{{Key: \"%s\", Value: -1}}", bsonField)
+	case "text":
+		indexDoc = fmt.Sprintf("bson.D{{Key: \"%s\", Value: \"text\"}}", bsonField)
+	case "unique":
+		indexDoc = fmt.Sprintf("bson.D{{Key: \"%s\", Value: 1}}", bsonField)
+		options = append(options, "Unique: utils.GetPointer(true)")
+	case "sparse":
+		indexDoc = fmt.Sprintf("bson.D{{Key: \"%s\", Value: 1}}", bsonField)
+		options = append(options, "Sparse: utils.GetPointer(true)")
+	default:
+		// Try to parse as direction
+		if indexType == "1" || indexType == "-1" {
+			indexDoc = fmt.Sprintf("bson.D{{Key: \"%s\", Value: %s}}", bsonField, indexType)
+		} else {
+			return fmt.Sprintf("\t// TODO: Unsupported index type '%s' for field %s", indexType, field.Name)
+		}
+	}
+
+	var optionsStr string
+	if len(options) > 0 {
+		optionsStr = fmt.Sprintf(", &options.IndexOptions{\n\t\t%s,\n\t}", strings.Join(options, ",\n\t\t"))
+	} else {
+		optionsStr = ", nil"
+	}
+
+	return fmt.Sprintf("\t// Index for %s field\n\terr := %sCollection.CreateIndex(%s%s)\n\tif err != nil {\n\t\treturn err\n\t}", field.Name, entityLower, indexDoc, optionsStr)
+}
+
+func generateCompoundIndex(index parser.Index, entityLower string) string {
+	if len(index.Fields) == 0 {
+		return ""
+	}
+
+	var indexFields []string
+	for _, field := range index.Fields {
+		if field.Type != "" {
+			// Special index type (text, 2dsphere, etc.)
+			indexFields = append(indexFields, fmt.Sprintf("{Key: \"%s\", Value: \"%s\"}", field.Name, field.Type))
+		} else {
+			// Direction-based index
+			indexFields = append(indexFields, fmt.Sprintf("{Key: \"%s\", Value: %d}", field.Name, field.Direction))
+		}
+	}
+
+	indexDoc := fmt.Sprintf("bson.D{\n\t\t%s,\n\t}", strings.Join(indexFields, ",\n\t\t"))
+
+	var options []string
+	if index.Unique {
+		options = append(options, "Unique: utils.GetPointer(true)")
+	}
+	if index.Sparse {
+		options = append(options, "Sparse: utils.GetPointer(true)")
+	}
+	if index.Name != "" {
+		options = append(options, fmt.Sprintf("Name: utils.GetPointer(\"%s\")", index.Name))
+	}
+
+	var optionsStr string
+	if len(options) > 0 {
+		optionsStr = fmt.Sprintf(", &options.IndexOptions{\n\t\t%s,\n\t}", strings.Join(options, ",\n\t\t"))
+	} else {
+		optionsStr = ", nil"
+	}
+
+	// Generate comment describing the compound index
+	var fieldNames []string
+	for _, field := range index.Fields {
+		direction := "asc"
+		if field.Direction == -1 {
+			direction = "desc"
+		}
+		if field.Type != "" {
+			fieldNames = append(fieldNames, fmt.Sprintf("%s(%s)", field.Name, field.Type))
+		} else {
+			fieldNames = append(fieldNames, fmt.Sprintf("%s(%s)", field.Name, direction))
+		}
+	}
+
+	comment := fmt.Sprintf("Compound index: %s", strings.Join(fieldNames, ", "))
+	if index.Unique {
+		comment += " (unique)"
+	}
+	if index.Sparse {
+		comment += " (sparse)"
+	}
+
+	return fmt.Sprintf("\t// %s\n\terr = %sCollection.CreateIndex(%s%s)\n\tif err != nil {\n\t\treturn err\n\t}", comment, entityLower, indexDoc, optionsStr)
 }

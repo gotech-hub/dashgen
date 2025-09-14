@@ -2,10 +2,12 @@
 A powerful CLI tool and Go library for generating complete backend boilerplate code from Go struct definitions.
 
 🚀 **Features**
-- **Multi-layer Generation**: Creates repository, API handlers, action services, client SDK, and main.go
+- **Multi-layer Generation**: Creates repository, API handlers, action services, and client SDK
 - **MongoDB Integration**: Built-in support for MongoDB with soft delete functionality
 - **RESTful API**: Automatically generates CRUD endpoints with proper HTTP methods
-- **Type-safe Code**: Generates fully type-safe Go code with validation
+- **Smart Validation**: Auto-generates validation code from struct tags (`validate:"required,email,min=2"`)
+- **Index Management**: Auto-generates MongoDB indexes from struct tags and comments
+- **Type-safe Code**: Generates fully type-safe Go code with comprehensive error handling
 - **Template-based**: Easily customizable templates for different architectures
 - **Cross-platform**: Available for Linux, macOS, and Windows
 
@@ -77,35 +79,33 @@ alias dashgen='docker run --rm -v $(pwd):/workspace ghcr.io/your-org/dashgen:lat
 dashgen --version
 ```
 
-## 🏗️ Cấu trúc dự án
+## 🏗️ Project Structure
 
-DashGen sẽ tạo ra cấu trúc thư mục như sau:
+DashGen generates the following directory structure:
 
 ```
 your-project/
 ├── model/
 │   └── user/
 │       ├── data.go          # Entity definition
-│       ├── init.go          # Database initialization
+│       ├── init.go          # Database initialization with indexes
 │       └── repository.go    # Repository interface & implementation
 ├── internal/
 │   ├── action/
 │   │   └── user.go         # Business logic services
 │   └── api/
-│       └── user.go         # HTTP handlers
-├── client/
-│   └── user.go             # SDK client methods
-├── generated/
-│   ├── router_user.go.snippet  # Router snippets
-│   └── init_user.go.snippet    # Init snippets
-└── main.go                 # Main application file
+│       └── user.go         # HTTP handlers with validation
+└── client/
+    └── user.go             # SDK client methods
 ```
 
-## 📝 Cách sử dụng
+**Note**: DashGen no longer generates or modifies `main.go` files. This allows the library to be used in existing projects without interfering with your main application setup.
 
-### 1. Định nghĩa Entity
+## 📝 Usage
 
-Tạo file `model/user/data.go`:
+### 1. Define Entity
+
+Create file `model/user/data.go`:
 
 ```go
 package user
@@ -113,57 +113,129 @@ package user
 import "time"
 
 // @entity db:users
+// @index email:1 unique
+// @index name:1,created_at:-1
+// @index email:text
 type User struct {
     ID        string    `json:"id" bson:"_id" validate:"required"`
-    Name      string    `json:"name" bson:"name" validate:"required,min=2,max=100"`
-    Email     string    `json:"email" bson:"email" validate:"required,email"`
+    Name      string    `json:"name" bson:"name" validate:"required,min=2,max=100" index:"1"`
+    Email     string    `json:"email" bson:"email" validate:"required,email" index:"unique"`
     Age       int       `json:"age" bson:"age" validate:"min=0,max=150"`
-    IsActive  bool      `json:"is_active" bson:"is_active"`
+    IsActive  bool      `json:"is_active" bson:"is_active" index:"1"`
     CreatedAt time.Time `json:"created_at" bson:"created_at"`
     UpdatedAt time.Time `json:"updated_at" bson:"updated_at"`
 }
 ```
 
-**Lưu ý quan trọng:**
-- Comment `// @entity` phải đứng ngay trước type declaration
-- Không được có dòng trống giữa comment và type
-- Có thể chỉ định tên collection: `// @entity db:custom_table_name`
+**Important Notes:**
+- Comment `// @entity` must be placed directly before the type declaration
+- No blank lines allowed between comment and type
+- You can specify collection name: `// @entity db:custom_table_name`
 
-### 2. Generate Code
+### 2. Validation Tags
 
-#### Generate từ một file cụ thể:
+DashGen supports automatic validation code generation from struct tags:
+
+| Tag | Description | Example |
+|-----|-------------|---------|
+| `required` | Field is required | `validate:"required"` |
+| `min=N` | Minimum length/value | `validate:"min=2"` |
+| `max=N` | Maximum length/value | `validate:"max=100"` |
+| `email` | Valid email format | `validate:"email"` |
+
+**Combined validation**: `validate:"required,email,min=5,max=100"`
+
+### 3. Index Definitions
+
+#### Field-level Indexes (via struct tags):
+```go
+type User struct {
+    Name  string `index:"1"`        // Ascending index
+    Email string `index:"unique"`   // Unique index
+    Tags  string `index:"text"`     // Text index
+    Score int    `index:"-1"`       // Descending index
+}
+```
+
+#### Compound Indexes (via comments):
+```go
+// @index field1:1,field2:-1 unique sparse name:custom_name
+// @index email:1 unique
+// @index name:text
+type User struct {
+    // ... fields
+}
+```
+
+**Index Options:**
+- `unique` - Creates unique index
+- `sparse` - Creates sparse index
+- `name:custom_name` - Sets custom index name
+- Field directions: `1` (ascending), `-1` (descending)
+- Special types: `text`, `2dsphere`, etc.
+
+### 4. Generate Code
+
+#### Generate from specific file:
 ```bash
 ./dashgen --root=/path/to/project --module=github.com/yourorg/yourapp --model=/path/to/model/user/data.go
 ```
 
-#### Generate từ tất cả file data.go:
+#### Generate from all data.go files:
 ```bash
 ./dashgen --root=/path/to/project --module=github.com/yourorg/yourapp
 ```
 
-#### Dry run (xem trước không tạo file):
+#### Dry run (preview without creating files):
 ```bash
 ./dashgen --root=/path/to/project --module=github.com/yourorg/yourapp --dry
 ```
 
-#### Force overwrite (ghi đè file đã tồn tại):
+#### Force overwrite existing files:
 ```bash
 ./dashgen --root=/path/to/project --module=github.com/yourorg/yourapp --force
 ```
 
-### 3. Các tham số
+### 5. Command Parameters
 
-| Tham số | Mô tả | Mặc định |
-|---------|-------|----------|
-| `--root` | Thư mục gốc của project (nơi chứa thư mục model/) | `.` |
-| `--module` | Go module path (dùng cho imports) | `github.com/your-org/app` |
-| `--model` | Đường dẫn đến file data.go cụ thể (tùy chọn) | - |
-| `--force` | Ghi đè file đã tồn tại | `false` |
-| `--dry` | Chỉ hiển thị preview, không tạo file | `false` |
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `--root` | Project root directory (containing model/ folder) | `.` |
+| `--module` | Go module path (used for imports) | `github.com/your-org/app` |
+| `--model` | Path to specific data.go file (optional) | - |
+| `--force` | Overwrite existing files | `false` |
+| `--dry` | Show preview only, don't create files | `false` |
 
-## 🔧 Các file được generate
+## 🔧 Generated Files
 
-### 1. Repository (`model/user/repository.go`)
+### 1. Database Initialization (`model/user/init.go`)
+```go
+func Init(database *mongo.Database) error {
+    // Collection setup
+    userCollection = collection.NewMongoDBGenericCollection[User]("users")
+    userCollection.SetDatabase(database)
+
+    // Create indexes automatically
+    if err := createIndexes(); err != nil {
+        return err
+    }
+    return nil
+}
+
+func createIndexes() error {
+    // Auto-generated index creation code
+    // Based on struct tags and @index comments
+    err := userCollection.CreateIndex(bson.D{
+        {Key: "email", Value: 1},
+    }, &options.IndexOptions{
+        Unique: utils.GetPointer(true),
+    })
+    // ... more indexes
+    return nil
+}
+```
+
+### 2. Repository (`model/user/repository.go`)
 ```go
 type Repository interface {
     Create(data *User) (*User, error)
@@ -171,53 +243,77 @@ type Repository interface {
     List(filter interface{}, offset, limit int64, sort map[string]int) ([]*User, error)
     Count(filter interface{}) (int64, error)
     UpdateByUserID(userID string, data *User) (*User, error)
-    DeleteByUserID(userID string) error
+    DeleteByUserID(userID string) error // Soft delete
 }
 ```
 
-### 2. API Handlers (`internal/api/user.go`)
+### 3. API Handlers with Validation (`internal/api/user.go`)
+```go
+func CreateUser(req request.APIRequest, res responder.APIResponder) error {
+    var userData user.User
+    if err := req.ParseBody(&userData); err != nil {
+        return res.Respond(common.NewErrorResponse(...))
+    }
+
+    // Auto-generated validation code
+    if userData.Name == "" {
+        return res.Respond(common.NewErrorResponse(common.APIStatus.Invalid,
+            "VALIDATION_FAILED", "name is required"))
+    }
+    if len(userData.Name) < 2 {
+        return res.Respond(common.NewErrorResponse(common.APIStatus.Invalid,
+            "VALIDATION_FAILED", "name must be at least 2 characters"))
+    }
+    if userData.Email != "" && !isValidEmail(userData.Email) {
+        return res.Respond(common.NewErrorResponse(common.APIStatus.Invalid,
+            "VALIDATION_FAILED", "email must be a valid email address"))
+    }
+
+    response := action.CreateUser(&userData)
+    return res.Respond(response)
+}
+```
+
+**API Endpoints:**
 - `CreateUser` - POST /v1/user
 - `GetUserByUserID` - GET /v1/user
 - `QueryUsers` - QUERY /v1/users
 - `UpdateUser` - PUT /v1/user
 - `DeleteUser` - DELETE /v1/user
 
-### 3. Client SDK (`client/user.go`)
+### 4. Client SDK (`client/user.go`)
 ```go
 func (c *BackendServiceClient) CreateUser(data *user.User) *common.APIResponse[*user.User]
 func (c *BackendServiceClient) GetUser(id string) *common.APIResponse[*user.User]
-// ... other methods
+func (c *BackendServiceClient) ListUsers(query *common.Query[user.User]) *common.APIResponse[*user.User]
+func (c *BackendServiceClient) UpdateUser(id string, data *user.User) *common.APIResponse[*user.User]
+func (c *BackendServiceClient) DeleteUser(id string) *common.APIResponse[any]
 ```
-
-### 4. Main Application (`main.go`)
-- Database initialization
-- Router setup
-- All CRUD endpoints registration
 
 ## 🧪 Testing
 
-Chạy script test để kiểm tra tool:
+Run the test script to verify the tool:
 
 ```bash
 ./test.sh
 ```
 
-Script sẽ:
+The script will:
 1. Build dashgen
-2. Test với sample data
+2. Test with sample data
 3. Generate files
-4. Hiển thị kết quả
+4. Display results
 
-## 📋 Ví dụ hoàn chỉnh
+## 📋 Complete Example
 
-### 1. Tạo project structure
+### 1. Create project structure
 ```bash
 mkdir myapp
 cd myapp
 mkdir -p model/user
 ```
 
-### 2. Tạo entity
+### 2. Create entity with validation and indexes
 ```bash
 cat > model/user/data.go << 'EOF'
 package user
@@ -225,10 +321,16 @@ package user
 import "time"
 
 // @entity db:users
+// @index email:1 unique
+// @index name:1,created_at:-1
 type User struct {
-    ID    string `json:"id" bson:"_id"`
-    Name  string `json:"name" bson:"name"`
-    Email string `json:"email" bson:"email"`
+    ID        string    `json:"id" bson:"_id" validate:"required"`
+    Name      string    `json:"name" bson:"name" validate:"required,min=2,max=100" index:"1"`
+    Email     string    `json:"email" bson:"email" validate:"required,email" index:"unique"`
+    Age       int       `json:"age" bson:"age" validate:"min=0,max=150"`
+    IsActive  bool      `json:"is_active" bson:"is_active"`
+    CreatedAt time.Time `json:"created_at" bson:"created_at"`
+    UpdatedAt time.Time `json:"updated_at" bson:"updated_at"`
 }
 EOF
 ```
@@ -238,77 +340,152 @@ EOF
 dashgen --root=. --module=github.com/myorg/myapp
 ```
 
-### 4. Kết quả
+### 4. Results
 ```
 ✅ Generated: model/user/init.go
 ✅ Generated: model/user/repository.go
 ✅ Generated: internal/action/user.go
 ✅ Generated: internal/api/user.go
 ✅ Generated: client/user.go
-✅ Generated: main.go
+✅ Generation finished.
 ```
 
-## ⚠️ Lưu ý quan trọng
+### 5. Integration in your main.go
+```go
+package main
 
-1. **Comment format**: Comment `@entity` phải đúng format và không có dòng trống
-2. **File đã tồn tại**: Tool sẽ skip file đã tồn tại (trừ khi dùng `--force`)
-3. **Main.go**: Sẽ được tạo mới hoặc skip nếu đã tồn tại
-4. **Module path**: Phải chính xác để imports hoạt động đúng
+import (
+    "log"
+    "go.mongodb.org/mongo-driver/mongo"
+    "gitlab.silvertiger.tech/go-sdk/go-mongodb/client"
+    "github.com/myorg/myapp/model/user"
+)
+
+func main() {
+    // Setup MongoDB connection
+    mongoClient := client.NewMongoClient("myapp", config, onDBConnected)
+    err := mongoClient.Connect()
+    if err != nil {
+        log.Fatal(err)
+    }
+}
+
+func onDBConnected(database *mongo.Database) error {
+    // Initialize all your entities
+    return user.Init(database)
+}
+```
+
+## ⚠️ Important Notes
+
+1. **Comment format**: Comment `@entity` must be in correct format with no blank lines
+2. **Existing files**: Tool will skip existing files (unless using `--force`)
+3. **Main.go**: DashGen no longer generates or modifies main.go files
+4. **Module path**: Must be accurate for imports to work correctly
+5. **Validation**: Only basic validation types are supported (required, min, max, email)
+6. **Indexes**: Field-level and compound indexes are automatically created during Init()
 
 ## 🐛 Troubleshooting
 
-### Command 'dashgen' not found sau khi `go install`
-Vấn đề này xảy ra khi Go bin directory không có trong PATH.
+### Command 'dashgen' not found after `go install`
+This happens when Go bin directory is not in PATH.
 
-**Giải pháp:**
+**Solution:**
 ```bash
-# Kiểm tra GOPATH
+# Check GOPATH
 go env GOPATH
 
-# Thêm vào PATH tạm thời
+# Add to PATH temporarily
 export PATH=$PATH:$(go env GOPATH)/bin
 
-# Thêm vào PATH vĩnh viễn
-echo 'export PATH=$PATH:$(go env GOPATH)/bin' >> ~/.zshrc  # cho zsh
-echo 'export PATH=$PATH:$(go env GOPATH)/bin' >> ~/.bashrc # cho bash
+# Add to PATH permanently
+echo 'export PATH=$PATH:$(go env GOPATH)/bin' >> ~/.zshrc  # for zsh
+echo 'export PATH=$PATH:$(go env GOPATH)/bin' >> ~/.bashrc # for bash
 
 # Reload shell
-source ~/.zshrc  # hoặc ~/.bashrc
+source ~/.zshrc  # or ~/.bashrc
 
-# Kiểm tra
+# Verify
 which dashgen
 dashgen --version
 ```
 
-### Lỗi "Found 0 entities"
-- Kiểm tra comment `@entity` đúng format
-- Đảm bảo không có dòng trống giữa comment và type
-- Kiểm tra đường dẫn file data.go
+### Error "Found 0 entities"
+- Check `@entity` comment format is correct
+- Ensure no blank lines between comment and type
+- Verify data.go file path
 
-### Lỗi template
-- Kiểm tra Go version >= 1.24
+### Template errors
+- Check Go version >= 1.24
 - Rebuild tool: `go install github.com/gotech-hub/dashgen/cmd/dashgen@latest`
 
-### File không được generate
-- Kiểm tra quyền ghi thư mục
-- Sử dụng `--dry` để debug
-- Kiểm tra đường dẫn `--root`
+### Files not generated
+- Check directory write permissions
+- Use `--dry` flag to debug
+- Verify `--root` path is correct
 
-## 🤝 Đóng góp
+### Validation not working
+- Ensure validate tags are properly formatted
+- Check that validation logic is imported in your API handlers
+- Verify field types are supported (string, int, int32, int64)
 
-1. Fork repository
-2. Tạo feature branch
-3. Commit changes
-4. Push và tạo Pull Request
+### Index creation fails
+- Check MongoDB connection is established before calling Init()
+- Verify field names in index definitions match struct fields
+- Ensure index syntax is correct: `field:1` or `field:-1`
 
-## � Deploy và Production
+## 🤝 Contributing
 
-### 1. Build cho production
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push and create a Pull Request
+
+## 🚀 Advanced Features
+
+### Custom Validation Rules
+You can extend validation by adding custom rules in the generated API handlers:
+
+```go
+// Add custom validation after auto-generated validation
+if userData.Age > 0 && userData.Age < 13 {
+    return res.Respond(common.NewErrorResponse(common.APIStatus.Invalid,
+        "VALIDATION_FAILED", "age must be 13 or older"))
+}
+```
+
+### Complex Index Patterns
+```go
+// @entity db:products
+// @index category:1,price:-1,created_at:-1 name:category_price_date
+// @index name:text,description:text name:search_index
+// @index location:2dsphere
+type Product struct {
+    Category    string    `json:"category" bson:"category"`
+    Price       float64   `json:"price" bson:"price"`
+    Name        string    `json:"name" bson:"name"`
+    Description string    `json:"description" bson:"description"`
+    Location    []float64 `json:"location" bson:"location"` // [lng, lat]
+    CreatedAt   time.Time `json:"created_at" bson:"created_at"`
+}
+```
+
+### Environment-based Configuration
+```bash
+# Use environment variables for common settings
+export DASHGEN_MODULE="github.com/myorg/myapp"
+export DASHGEN_ROOT="/path/to/project"
+dashgen --module=$DASHGEN_MODULE --root=$DASHGEN_ROOT
+```
+
+## 🔧 Build and Deployment
+
+### 1. Build for production
 ```bash
 # Build optimized binary
 CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o dashgen ./cmd/dashgen
 
-# Hoặc build cho nhiều platform
+# Cross-platform builds
 GOOS=windows GOARCH=amd64 go build -o dashgen.exe ./cmd/dashgen
 GOOS=darwin GOARCH=amd64 go build -o dashgen-mac ./cmd/dashgen
 GOOS=linux GOARCH=amd64 go build -o dashgen-linux ./cmd/dashgen
@@ -316,7 +493,7 @@ GOOS=linux GOARCH=amd64 go build -o dashgen-linux ./cmd/dashgen
 
 ### 2. Docker deployment
 ```dockerfile
-FROM golang:1.21-alpine AS builder
+FROM golang:1.24-alpine AS builder
 WORKDIR /app
 COPY . .
 RUN go build -o dashgen ./cmd/dashgen
@@ -337,49 +514,83 @@ jobs:
   generate:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
-    - uses: actions/setup-go@v2
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v4
       with:
-        go-version: 1.21
+        go-version: '1.24'
     - name: Build dashgen
       run: go build -o dashgen ./cmd/dashgen
     - name: Generate code
       run: ./dashgen --root=. --module=${{ github.repository }}
 ```
 
-## 🔧 Advanced Usage
+## 🎯 Best Practices
 
-### Custom Templates
-Bạn có thể tùy chỉnh templates trong `internal/templates/templates.go`:
-
+### 1. Entity Design
 ```go
-// Sửa template để thay đổi format output
-var ModelRepository = `package {{.Entity | lower}}
-// Your custom template here
-`
+// Good: Clear, consistent naming
+// @entity db:users
+// @index email:1 unique
+// @index created_at:-1
+type User struct {
+    ID        string    `json:"id" bson:"_id" validate:"required"`
+    Email     string    `json:"email" bson:"email" validate:"required,email" index:"unique"`
+    Name      string    `json:"name" bson:"name" validate:"required,min=2,max=100"`
+    CreatedAt time.Time `json:"created_at" bson:"created_at"`
+}
 ```
 
-### Multiple Entities
-```bash
-# Generate cho nhiều entities cùng lúc
-./dashgen --root=. --module=github.com/myorg/myapp
-# Tool sẽ tự động tìm tất cả file data.go trong model/
-```
+### 2. Validation Strategy
+- Use `required` for mandatory fields
+- Set reasonable `min` and `max` limits
+- Use `email` for email fields
+- Combine multiple rules: `validate:"required,email,min=5"`
 
-### Environment Variables
-```bash
-# Có thể sử dụng env vars
-export DASHGEN_MODULE="github.com/myorg/myapp"
-export DASHGEN_ROOT="/path/to/project"
-./dashgen --module=$DASHGEN_MODULE --root=$DASHGEN_ROOT
+### 3. Index Strategy
+- Create unique indexes for unique fields (email, username)
+- Add compound indexes for common query patterns
+- Use text indexes for search functionality
+- Consider sparse indexes for optional fields
+
+### 4. Project Organization
+```
+project/
+├── model/
+│   ├── user/data.go
+│   ├── product/data.go
+│   └── order/data.go
+├── internal/
+│   ├── api/          # Generated API handlers
+│   └── action/       # Generated business logic
+└── client/           # Generated SDK
 ```
 
 ## 📊 Performance Tips
 
-1. **Batch Generation**: Generate nhiều entities cùng lúc thay vì từng cái một
-2. **Skip Existing**: Tool tự động skip file đã tồn tại để tăng tốc độ
-3. **Dry Run**: Sử dụng `--dry` để test trước khi generate thực sự
+1. **Batch Generation**: Generate multiple entities at once instead of one by one
+2. **Skip Existing**: Tool automatically skips existing files for faster execution
+3. **Dry Run**: Use `--dry` flag to test before actual generation
+4. **Selective Generation**: Use `--model` flag to generate specific entities only
 
-## �📄 License
+## 🔍 Validation Reference
 
-MIT License - xem file LICENSE để biết thêm chi tiết.
+| Rule | Type Support | Example | Generated Code |
+|------|-------------|---------|----------------|
+| `required` | string, int | `validate:"required"` | Checks for empty/zero values |
+| `min=N` | string, int | `validate:"min=2"` | Length/value minimum check |
+| `max=N` | string, int | `validate:"max=100"` | Length/value maximum check |
+| `email` | string | `validate:"email"` | Email format validation |
+
+## 🗂️ Index Reference
+
+| Type | Syntax | Example | Description |
+|------|--------|---------|-------------|
+| Ascending | `index:"1"` | `Name string \`index:"1"\`` | Single field ascending |
+| Descending | `index:"-1"` | `Date time.Time \`index:"-1"\`` | Single field descending |
+| Unique | `index:"unique"` | `Email string \`index:"unique"\`` | Unique constraint |
+| Text | `index:"text"` | `Content string \`index:"text"\`` | Full-text search |
+| Compound | `@index field1:1,field2:-1` | See examples above | Multiple fields |
+
+## 📄 License
+
+MIT License - see LICENSE file for details.

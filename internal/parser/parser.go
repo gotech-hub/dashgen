@@ -14,6 +14,20 @@ type Field struct {
 	JSONTag  string
 	BSONTag  string
 	Validate string
+	Index    string // Index definition: "1", "-1", "text", "unique", etc.
+}
+
+type Index struct {
+	Fields []IndexField // Fields in the index
+	Unique bool         // Whether the index is unique
+	Sparse bool         // Whether the index is sparse
+	Name   string       // Custom index name (optional)
+}
+
+type IndexField struct {
+	Name      string // Field name
+	Direction int    // 1 for ascending, -1 for descending
+	Type      string // "text", "2dsphere", etc. (optional)
 }
 
 type Entity struct {
@@ -22,6 +36,7 @@ type Entity struct {
 	Plural  string
 	DBName  string
 	Fields  []Field
+	Indexes []Index // Compound indexes defined via comments
 }
 
 func ParseDataGo(path string) ([]Entity, error) {
@@ -52,6 +67,7 @@ func ParseDataGo(path string) ([]Entity, error) {
 
 			var isEntity bool
 			var dbName string
+			var indexes []Index
 
 			// Check both GenDecl.Doc and TypeSpec.Doc
 			var docComments *ast.CommentGroup
@@ -72,6 +88,12 @@ func ParseDataGo(path string) ([]Entity, error) {
 								dbName = strings.TrimPrefix(p, "db:")
 							}
 						}
+					} else if strings.HasPrefix(text, "@index") {
+						// Parse index definition: @index field1:1,field2:-1 unique sparse name:custom_name
+						idx := parseIndexComment(text)
+						if idx != nil {
+							indexes = append(indexes, *idx)
+						}
 					}
 				}
 			}
@@ -87,8 +109,8 @@ func ParseDataGo(path string) ([]Entity, error) {
 					}
 					name := f.Names[0].Name
 					typ := exprString(f.Type)
-					jsonTag, bsonTag, validate := parseTags(f.Tag)
-					fields = append(fields, Field{Name: name, Type: typ, JSONTag: jsonTag, BSONTag: bsonTag, Validate: validate})
+					jsonTag, bsonTag, validate, index := parseTags(f.Tag)
+					fields = append(fields, Field{Name: name, Type: typ, JSONTag: jsonTag, BSONTag: bsonTag, Validate: validate, Index: index})
 				}
 			}
 
@@ -102,6 +124,7 @@ func ParseDataGo(path string) ([]Entity, error) {
 				Plural:  naivePlural(entName),
 				DBName:  dbName,
 				Fields:  fields,
+				Indexes: indexes,
 			})
 		}
 		return true
@@ -133,7 +156,7 @@ func relModelPath(path string) string {
 	return "model"
 }
 
-func parseTags(tag *ast.BasicLit) (jsonTag, bsonTag, validate string) {
+func parseTags(tag *ast.BasicLit) (jsonTag, bsonTag, validate, index string) {
 	if tag == nil {
 		return
 	}
@@ -152,6 +175,8 @@ func parseTags(tag *ast.BasicLit) (jsonTag, bsonTag, validate string) {
 			bsonTag = v
 		case "validate":
 			validate = v
+		case "index":
+			index = v
 		}
 	}
 	return
@@ -188,4 +213,75 @@ func naivePlural(s string) string {
 		return s[:len(s)-1] + "ies"
 	}
 	return s + "s"
+}
+
+// parseIndexComment parses index definition from comment
+// Format: @index field1:1,field2:-1 unique sparse name:custom_name
+func parseIndexComment(comment string) *Index {
+	// Remove @index prefix
+	comment = strings.TrimSpace(strings.TrimPrefix(comment, "@index"))
+	if comment == "" {
+		return nil
+	}
+
+	parts := strings.Fields(comment)
+	if len(parts) == 0 {
+		return nil
+	}
+
+	index := &Index{}
+
+	// First part should be field definitions
+	fieldDefs := parts[0]
+	fieldPairs := strings.Split(fieldDefs, ",")
+
+	for _, pair := range fieldPairs {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+
+		// Parse field:direction or field:type
+		colonIdx := strings.Index(pair, ":")
+		if colonIdx == -1 {
+			// Just field name, default to ascending
+			index.Fields = append(index.Fields, IndexField{
+				Name:      pair,
+				Direction: 1,
+			})
+		} else {
+			fieldName := pair[:colonIdx]
+			value := pair[colonIdx+1:]
+
+			indexField := IndexField{Name: fieldName}
+
+			// Try to parse as direction first
+			if value == "1" {
+				indexField.Direction = 1
+			} else if value == "-1" {
+				indexField.Direction = -1
+			} else {
+				// It's a type (text, 2dsphere, etc.)
+				indexField.Type = value
+				indexField.Direction = 1 // Default direction
+			}
+
+			index.Fields = append(index.Fields, indexField)
+		}
+	}
+
+	// Parse options from remaining parts
+	for i := 1; i < len(parts); i++ {
+		part := parts[i]
+		switch {
+		case part == "unique":
+			index.Unique = true
+		case part == "sparse":
+			index.Sparse = true
+		case strings.HasPrefix(part, "name:"):
+			index.Name = strings.TrimPrefix(part, "name:")
+		}
+	}
+
+	return index
 }

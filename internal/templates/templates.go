@@ -40,16 +40,7 @@ func GetRepository() {{.Entity}}Repository {
 }
 
 func createIndexes() error {
-	// TODO: Add your custom indexes here
-	// Example:
-	// err := {{.EntityLower}}Collection.CreateIndex(bson.D{
-	//     {Key: "field_name", Value: 1},
-	// }, &options.IndexOptions{
-	//     Unique: utils.GetPointer(true),
-	// })
-	// if err != nil {
-	//     return err
-	// }
+{{if hasIndexes .Fields .Indexes}}{{generateIndexes .Fields .Indexes .EntityLower}}{{else}}	// No indexes defined{{end}}
 
 	return nil
 }
@@ -242,6 +233,9 @@ func Delete{{.Entity}}(id primitive.ObjectID) *common.APIResponse[any] {
 var API = `package api
 
 import (
+	{{if hasRequiredFields .Fields}}"regexp"
+	"strings"{{end}}
+
 	"gitlab.silvertiger.tech/go-sdk/go-common/common"
 	"gitlab.silvertiger.tech/go-sdk/go-common/request"
 	"gitlab.silvertiger.tech/go-sdk/go-common/responder"
@@ -250,6 +244,14 @@ import (
 	constants "{{.Module}}/utils"
 )
 
+{{if hasRequiredFields .Fields}}// Email validation regex
+var emailRegex = regexp.MustCompile(` + "`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$`" + `)
+
+// isValidEmail validates email format
+func isValidEmail(email string) bool {
+	return emailRegex.MatchString(strings.TrimSpace(email))
+}{{end}}
+
 // Create{{.Entity}} creates a new {{.EntityLower}}
 func Create{{.Entity}}(req request.APIRequest, res responder.APIResponder) error {
 	var {{.EntityLower}}Data {{.Entity | lower}}.{{.Entity}}
@@ -257,11 +259,7 @@ func Create{{.Entity}}(req request.APIRequest, res responder.APIResponder) error
 		return res.Respond(common.NewErrorResponse(common.APIStatus.Invalid, "INVALID_REQUEST_BODY", "Failed to parse request body: "+err.Error()))
 	}
 
-	// TODO: Add validation for required fields
-	// Example:
-	// if {{.EntityLower}}Data.{{.Entity}}ID == "" {
-	//     return res.Respond(common.NewErrorResponse(common.APIStatus.Invalid, "VALIDATION_FAILED", "{{.EntityLower}}_id is required"))
-	// }
+{{generateValidation .Fields .EntityLower}}
 
 	response := action.Create{{.Entity}}(&{{.EntityLower}}Data)
 	return res.Respond(response)
@@ -299,6 +297,8 @@ func Update{{.Entity}}(req request.APIRequest, res responder.APIResponder) error
 	if err := req.ParseBody(&{{.EntityLower}}Data); err != nil {
 		return res.Respond(common.NewErrorResponse(common.APIStatus.Invalid, "INVALID_REQUEST_BODY", "Failed to parse request body: "+err.Error()))
 	}
+
+{{generateValidation .Fields .EntityLower}}
 
 	response := action.Update{{.Entity}}({{.EntityLower}}ID, &{{.EntityLower}}Data)
 	return res.Respond(response)
@@ -373,159 +373,6 @@ func (c *BackendServiceClient) Delete{{.Entity}}(id string) *common.APIResponse[
 }
 `
 
-var MainRouter = `
-	// Register {{.Entity}} API routes
-	// Core CRUD operations
-	server.SetHandler(common.APIMethod.POST, "/v1/{{.EntityLower}}", api.Create{{.Entity}})
-	server.SetHandler(common.APIMethod.GET, "/v1/{{.EntityLower}}", api.Get{{.Entity}}By{{.Entity}}ID)
-	server.SetHandler(common.APIMethod.QUERY, "/v1/{{.EntityLower}}s", api.Query{{.EntityPlural}})
-	server.SetHandler(common.APIMethod.PUT, "/v1/{{.EntityLower}}", api.Update{{.Entity}})
-	server.SetHandler(common.APIMethod.DELETE, "/v1/{{.EntityLower}}", api.Delete{{.Entity}})
-`
+// MainRouter and MainInit templates removed - library no longer generates main.go content
 
-var MainInit = `	{{.Entity | lower}}.Init(database)`
-
-var MainGo = `package main
-
-import (
-	"fmt"
-	"log"
-	"sync"
-	"time"
-
-	"github.com/go-redis/redis/v8"
-	"go.mongodb.org/mongo-driver/mongo"
-
-	"gitlab.silvertiger.tech/go-sdk/go-backend/backend"
-	"gitlab.silvertiger.tech/go-sdk/go-cache/rcache"
-	"gitlab.silvertiger.tech/go-sdk/go-common/common"
-	"gitlab.silvertiger.tech/go-sdk/go-common/request"
-	"gitlab.silvertiger.tech/go-sdk/go-common/responder"
-	"gitlab.silvertiger.tech/go-sdk/go-common/server"
-	"gitlab.silvertiger.tech/go-sdk/go-mongodb/client"
-	"{{.Module}}/internal/api"
-	"{{.Module}}/internal/conf"
-	// Import all model packages for initialization
-	{{range .Entities}}"{{$.Module}}/{{.PkgPath}}"
-	{{end}}
-)
-
-type infoData struct {
-	Service     string    ` + "`json:\"service\"`" + `
-	Environment string    ` + "`json:\"environment\"`" + `
-	Version     string    ` + "`json:\"version\"`" + `
-	StartTime   time.Time ` + "`json:\"startTime\"`" + `
-}
-
-var globalInfo *infoData
-
-func info(req request.APIRequest, res responder.APIResponder) error {
-	return res.Respond(&common.APIResponse[infoData]{
-		Status:  common.APIStatus.Ok,
-		Data:    []infoData{*globalInfo},
-		Message: "Service runs normally.",
-	})
-}
-
-func onMainDBConnected(database *mongo.Database) error {
-	fmt.Println("Successfully connected to MongoDB!")
-
-	// Initialize all models
-{{range .Entities}}	{{.Name | lower}}.Init(database)
-{{end}}
-	return nil
-}
-
-func initMongoClient() {
-	// Create a configuration
-	mainDBConfig := client.Configuration{
-		Username:      conf.Conf.DBConfig.MainDB.Username,
-		Password:      conf.Conf.DBConfig.MainDB.Password,
-		Address:       conf.Conf.DBConfig.MainDB.Address,
-		DBName:        conf.Conf.DBConfig.MainDB.DBName,
-		AuthDB:        conf.Conf.DBConfig.MainDB.AuthDB,
-		AuthMechanism: conf.Conf.DBConfig.MainDB.AuthMechanism,
-		DoWriteTest:   true,
-	}
-	// Create a MongoDB client
-	mongoClient := client.NewMongoClient(conf.Conf.BackendConfig.BackendApp.ServiceName, mainDBConfig, onMainDBConnected)
-
-	// Connect to the database
-	err := mongoClient.Connect()
-	if err != nil {
-		log.Fatalf("Failed to connect to MongoDB: %v", err)
-	}
-}
-
-func initRedisClient() {
-	if conf.Conf.DBConfig.KeyDB == nil {
-		return
-	}
-
-	redisConfig := &rcache.Configuration{
-		Name: conf.Conf.BackendConfig.BackendApp.ServiceName,
-		Option: &redis.Options{
-			// TODO: Use proper config values
-			Addr:     conf.Conf.DBConfig.KeyDB.Address,
-			Username: conf.Conf.DBConfig.KeyDB.Username,
-			Password: conf.Conf.DBConfig.KeyDB.Password,
-			DB:       conf.Conf.DBConfig.KeyDB.DB,
-		},
-		Required: true, // Panic if Redis connection fails
-	}
-
-	// Create Redis client
-	_, err := rcache.NewClient(redisConfig)
-	if err != nil {
-		// Log error but don't fail - fallback to no cache
-		fmt.Printf("Failed to initialize Redis client for cache: %v\n", err)
-		return
-	}
-}
-
-func main() {
-	// load config from env
-	// don't use func init default because this project will be used as a library
-	conf.NewConfig()
-
-	globalInfo = &infoData{
-		Service:     conf.Conf.BackendConfig.BackendApp.ServiceName,
-		Version:     conf.Conf.Version,
-		Environment: conf.Conf.Env,
-		StartTime:   time.Now(),
-	}
-
-	initMongoClient()
-	initRedisClient()
-
-	// Create a new server
-	server := server.NewServer(server.ServerConfig{
-		Protocol: conf.Conf.Protocol,
-	})
-
-	// Initialize the backend
-	backend.NewBackend(server, conf.Conf.BackendConfig.BackendApp.Username, conf.Conf.BackendConfig.BackendApp.Password, conf.Conf.BackendConfig.BackendApp.SecretKey)
-
-	server.SetHandler(common.APIMethod.GET, "/api-info", info)
-
-	// Register API routes for all entities
-{{range .Entities}}
-	// Register {{.Name}} API routes
-	// Core CRUD operations
-	server.SetHandler(common.APIMethod.POST, "/v1/{{.Name | lower}}", api.Create{{.Name}})
-	server.SetHandler(common.APIMethod.GET, "/v1/{{.Name | lower}}", api.Get{{.Name}}By{{.Name}}ID)
-	server.SetHandler(common.APIMethod.QUERY, "/v1/{{.Name | lower}}s", api.Query{{.Plural}})
-	server.SetHandler(common.APIMethod.PUT, "/v1/{{.Name | lower}}", api.Update{{.Name}})
-	server.SetHandler(common.APIMethod.DELETE, "/v1/{{.Name | lower}}", api.Delete{{.Name}})
-{{end}}
-	// Expose the server
-	server.Expose(conf.Conf.Port)
-
-	// Use a WaitGroup to keep the main function from exiting
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go server.Start(&wg)
-
-	wg.Wait()
-}
-`
+// MainGo template removed - library no longer generates main.go files
