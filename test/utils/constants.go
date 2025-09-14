@@ -5,4 +5,5 @@ const (
 	ParamExistingID = "existing_id"
 	ParamUserID     = "user_id"
 	ParamProductID  = "product_id"
+	ParamOrderID = "order_id"
 )
